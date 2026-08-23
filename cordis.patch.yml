@@ -1,0 +1,7 @@
+# dsh-sidebar-buttons bundle layer: applied automatically when the package is
+# installed (package.json declares dsh.bundle.patch), so a profile that runs
+# `dsh plugin add github:<user>/dsh-sidebar-buttons` gets the wiring without
+# any manual cordis.patch.yml edits. Later layers override these rows by id.
+- insert:
+    - id: dsh-sidebar-buttons
+      name: dsh-sidebar-buttons
