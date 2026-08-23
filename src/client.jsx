@@ -113,8 +113,22 @@ const STYLES = `
 .dsh-sbf-pop{position:fixed;bottom:96px;left:12px;z-index:2000;display:flex;flex-direction:column;width:248px;max-width:calc(100vw - 24px);padding:10px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-shadow-lv3)}
 .dsh-sbf-popTitle{padding:2px 6px 8px;color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:500;line-height:18px}
 .dsh-sbf-popList{display:flex;flex-direction:column;gap:2px}
-.dsh-sbf-popRow{display:flex;align-items:center;min-width:0;border-radius:10px}
-.dsh-sbf-popRow:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-sbf-popRow{display:flex;align-items:center;min-width:0;border-radius:10px;padding:2px}
+/* Popup rows: buttons become flush menu items — full row width, no bleed,
+   uniform 34px height, single-layer hover. Without this the original
+   sidebar-button styles (calc(100%+8px) width, -4px margins, 12px radius)
+   overflow the card and read as a second overlapping layer. */
+.dsh-sbf-pop .dsh-sbf-popRow > button{
+  width:100%!important;
+  height:34px!important;
+  min-height:34px!important;
+  margin:0!important;
+  padding:6px 10px!important;
+  border-radius:8px!important;
+  box-sizing:border-box!important;
+  background:transparent!important
+}
+.dsh-sbf-pop .dsh-sbf-popRow > button:hover{background:var(--dsw-alias-interactive-bg-hover)!important}
 /* Settings section rows. */
 .dsh-sbf-settings{display:flex;flex-direction:column;gap:10px;padding:4px 0}
 .dsh-sbf-settingsHint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
