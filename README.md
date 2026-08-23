@@ -1,5 +1,7 @@
 # dsh-sidebar-buttons
 
+English | [中文](README.zh.md)
+
 A DeepSeek Harness plugin for the buttons at the bottom of the sidebar: reorder them, hide the ones you don't use, and give them all the same height.
 
 ![More button](assets/sidebar-more.png)

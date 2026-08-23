@@ -1,5 +1,7 @@
 # dsh-sidebar-buttons
 
+[English](README.md) | 中文
+
 一个管理 DeepSeek Harness 左下侧栏按钮的插件：调整顺序、隐藏不用的按钮、统一按钮高度。
 
 ![更多按钮](assets/sidebar-more.png)
