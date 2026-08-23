@@ -2,12 +2,15 @@
 
 English · [简体中文](./README.zh.md)
 
-A DeepSeek Harness plugin. Manages the buttons at the bottom of the left sidebar: reorder them, hide the ones you don't use, and give them all the same height. Client-side only, nothing in the DSH core is touched, uninstalling restores the original sidebar.
+A DeepSeek Harness plugin. Manages the buttons at the bottom of the left sidebar: reorder them, control each one with three display modes, and give them all the same height. Client-side only, nothing in the DSH core is touched, uninstalling restores the original sidebar.
 
 ## Features
 
 - New "Sidebar Buttons" page in Settings lists every button registered in the sidebar foot; drag rows to change the order, the sidebar updates immediately
-- Each button can be toggled on/off; hidden buttons move into a "More" button above Settings (only shown while at least one button is hidden), where they stay usable
+- Each button has three display modes:
+  - **Show**: pinned in the sidebar
+  - **Fold into More**: moved into a "More" button above Settings (only shown while at least one button is folded), where it stays usable
+  - **Hide**: absent from the sidebar and the More menu alike — recoverable only from the settings page
 - Buttons from different plugins come in different sizes; pick one height for all of them, keep each button's original size, or enter a custom value
 
 ## Screenshots

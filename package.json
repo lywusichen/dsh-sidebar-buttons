@@ -1,7 +1,7 @@
 {
   "name": "dsh-sidebar-buttons",
-  "version": "0.1.1",
-  "description": "DeepSeek Harness plugin: manage the sidebar-foot action buttons — reorder them by drag-and-drop and show/hide them from a dedicated settings page; hidden buttons collect into a fixed \"More\" button pinned above Settings.",
+  "version": "0.1.2",
+  "description": "DeepSeek Harness plugin: manage the sidebar-foot action buttons — reorder them by drag-and-drop and control each one from a dedicated settings page with three states (show in sidebar / fold into the \"More\" menu / fully hide).",
   "license": "MIT",
   "type": "module",
   "main": "index.js",

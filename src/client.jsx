@@ -4,9 +4,11 @@
  * Manages the sidebar-foot action buttons (`sidebar.footer.action`):
  *   1. Order: the "侧栏按钮设置" settings section lists every registered
  *      footer button and lets the user reorder it by drag-and-drop.
- *   2. Visibility: each button can be hidden from the sidebar; hidden
- *      buttons collect into a fixed "More" button (pinned directly above
- *      Settings) whose popup shows the hidden buttons, still clickable.
+ *   2. Visibility (three states): each button is either shown in the
+ *      sidebar, folded into a fixed "More" button (pinned directly above
+ *      Settings) whose popup still lists it clickable, or fully hidden
+ *      (absent from the sidebar and the More menu alike — recoverable only
+ *      from the settings page).
  *
  * Mechanism (mirror/shadow takeover — zero core changes):
  *   The slot core lets several entries share one list cell (same `id`) at
@@ -15,11 +17,12 @@
  *   -1 carrying the ORIGINAL component/inject/locale, so the button behaves
  *   identically — but the mirror wraps it in a flex cell whose CSS `order`
  *   (read live from the shared layout store) decides the display sequence,
- *   and renders nothing while the button is hidden. Hidden buttons get a
- *   second functional mirror into our own `dsh-sbf.more` child slot, which
- *   the More button's popup renders. A reconciler watches the slot ledger
- *   and keeps the mirrors in sync as buttons register/unregister (plugin
- *   load order is irrelevant).
+ *   and renders nothing while the button is not 'shown'. Buttons folded into
+ *   the More menu get a second functional mirror into our own `dsh-sbf.more`
+ *   child slot, which the More button's popup renders; fully hidden buttons
+ *   get no such mirror, so they vanish everywhere. A reconciler watches the
+ *   slot ledger and keeps the mirrors in sync as buttons register/unregister
+ *   (plugin load order is irrelevant).
  */
 
 import { createElement, useEffect, useState } from 'react'
@@ -45,16 +48,29 @@ const SECTION_ORDER = 5
 /** System-owned footer buttons we leave alone (not listed, not mirrored). */
 const IGNORED_IDS = new Set(['cordis-panel'])
 
+// --- Three-state visibility --------------------------------------------------
+// Every managed button is in exactly one mode:
+//   'shown'  — pinned in the sidebar,
+//   'more'   — folded into the "More" menu (still clickable there),
+//   'hidden' — fully hidden: absent from the sidebar AND the More menu,
+//              recoverable only from the settings page.
+const MODE_SHOWN = 'shown'
+const MODE_MORE = 'more'
+const MODE_HIDDEN = 'hidden'
+/** Order of the segmented control options in the settings page. */
+const MODES = [MODE_SHOWN, MODE_MORE, MODE_HIDDEN]
+
 // --- UI copy -----------------------------------------------------------------
 
 const zh = {
   'nav': '侧栏按钮设置',
-  'settings.hint': '拖动按钮调整它们在侧栏中的显示顺序；关闭显示后，按钮会收进侧栏底部的“更多”菜单，仍可点击使用。',
-  'settings.shown': '显示中',
-  'settings.hidden': '已隐藏',
+  'settings.hint': '拖动按钮调整它们在侧栏中的显示顺序；“显示”常驻侧栏，“折叠到更多”收进侧栏底部的“更多”菜单（仍可点击使用），“完全隐藏”则不再出现在任何位置（仅可在此恢复）。',
+  'settings.mode.shown': '显示',
+  'settings.mode.more': '折叠到更多',
+  'settings.mode.hidden': '完全隐藏',
   'settings.untouchable': '不可管理',
   'more.label': '更多',
-  'more.title': '已隐藏的按钮',
+  'more.title': '更多按钮',
   'more.open': '打开“更多”菜单',
   'settings.size': '按钮高度',
   'settings.sizeHint': '侧栏里所有按钮统一为所选高度（“设置”按钮除外）；“不修改”保持各按钮自身大小。',
@@ -67,12 +83,13 @@ const zh = {
 
 const en = {
   'nav': 'Sidebar Buttons',
-  'settings.hint': 'Drag buttons to change their order in the sidebar. Turning a button off moves it into the “More” menu at the bottom of the sidebar, where it stays clickable.',
-  'settings.shown': 'Shown',
-  'settings.hidden': 'Hidden',
+  'settings.hint': 'Drag buttons to reorder the sidebar. “Show” pins a button to the sidebar, “Fold into More” moves it into the “More” menu at the bottom (still clickable), and “Hide” removes it everywhere — it can only be recovered here.',
+  'settings.mode.shown': 'Show',
+  'settings.mode.more': 'Fold into More',
+  'settings.mode.hidden': 'Hide',
   'settings.untouchable': 'Not manageable',
   'more.label': 'More',
-  'more.title': 'Hidden buttons',
+  'more.title': 'More buttons',
   'more.open': 'Open the More menu',
   'settings.size': 'Button height',
   'settings.sizeHint': 'All sidebar buttons use the chosen height (the Settings button is excluded); “Keep original” leaves each button at its own size.',
@@ -141,12 +158,11 @@ const STYLES = `
 .dsh-sbf-rowIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;color:var(--dsw-alias-label-secondary)}
 .dsh-sbf-rowIcon--emoji{font-size:15px;line-height:1}
 .dsh-sbf-name{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:22px}
-.dsh-sbf-toggle{flex:none;display:inline-flex;align-items:center;gap:8px;padding:0;border:none;background:transparent;cursor:pointer;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px}
-.dsh-sbf-toggleTrack{position:relative;display:inline-block;width:34px;height:20px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover-solid);transition:background 120ms ease}
-.dsh-sbf-toggle.on .dsh-sbf-toggleTrack{background:var(--dsw-alias-accent-strong)}
-.dsh-sbf-toggleThumb{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-primary-inverted);transition:transform 120ms ease}
-.dsh-sbf-toggle.on .dsh-sbf-toggleThumb{transform:translateX(14px)}
-.dsh-sbf-toggleText{color:var(--dsw-alias-label-secondary);font-size:12px}
+/* Three-state segmented control (feature 4): Show / Fold into More / Hide. */
+.dsh-sbf-mode{flex:none;display:flex;gap:4px}
+.dsh-sbf-modeOpt{min-width:52px;height:26px;padding:0 8px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;line-height:24px;cursor:pointer;white-space:nowrap}
+.dsh-sbf-modeOpt:hover{border-color:var(--dsw-alias-border-l3)}
+.dsh-sbf-modeOpt.on{border-color:var(--dsw-alias-accent-strong);color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-sbf-row.untouchable{opacity:.55;cursor:default}
 /* Button-size picker (feature 3). */
 .dsh-sbf-sizeRow{display:flex;align-items:center;gap:12px;padding:2px 2px 0}
@@ -175,7 +191,8 @@ function ensureStyles() {
  * Layout state shared by every surface of this plugin (footer mirrors, the
  * More button, the settings section):
  *   - `order`: user-chosen button id sequence,
- *   - `visible`: per-id visibility map (absent = visible),
+ *   - `visible`: per-id three-state mode map ('shown' | 'more' | 'hidden';
+ *     absent = shown),
  *   - `size`: uniform footer-button height in px (0 = keep each button's own
  *     size). Persisted to localStorage under STORE_KEY by the framework.
  */
@@ -183,13 +200,35 @@ const DEFAULT_SIZE_PX = 34
 /** Height presets offered in the settings page (feature 3). */
 const SIZE_OPTIONS = [28, 34, 40]
 
+/** Resolve a button's visibility mode, tolerating the legacy boolean format
+ *  persisted by v0.1.x (false === old "hidden, folded into More"; true or
+ *  absent === shown). */
+function modeOf(visible, id) {
+  const v = visible[id]
+  if (v === false) return MODE_MORE
+  if (v === true || v === undefined) return MODE_SHOWN
+  return v
+}
+
 function createLayoutStore(ctx) {
   return defineStore({
     init: () => ({ order: [], visible: {}, size: DEFAULT_SIZE_PX }),
     persist: STORE_KEY,
     actions: {
       setOrder(draft, ids) { draft.order = ids },
-      setVisible(draft, id, shown) { draft.visible = { ...draft.visible, [id]: !!shown } },
+      /**
+       * Set one button's mode. The write also normalizes any legacy boolean
+       * values still sitting in `visible` (v0.1.x data) so the persisted
+       * payload converges to the three-state enum on first interaction.
+       */
+      setMode(draft, id, mode) {
+        const next = {}
+        for (const [k, v] of Object.entries(draft.visible)) {
+          next[k] = v === false ? MODE_MORE : (v === true ? MODE_SHOWN : v)
+        }
+        next[id] = mode
+        draft.visible = next
+      },
       setSize(draft, px) { draft.size = px },
     },
   })
@@ -257,18 +296,18 @@ function displayOrder(state, id, fallbackIndex) {
 
 /**
  * Build the shadow component for one button. It reads the shared store for
- * order + visibility and either renders nothing (hidden) or the ORIGINAL
- * button component inside a flex cell whose inline `order` drives the
- * sidebar sequence. All composed props (kit, inject face, `t`, owner) are
+ * order + visibility and either renders nothing (anything but 'shown') or the
+ * ORIGINAL button component inside a flex cell whose inline `order` drives
+ * the sidebar sequence. All composed props (kit, inject face, `t`, owner) are
  * passed straight through, so the original button works exactly as before.
  */
 function makeMirror(id, origComponent, fallbackIndex) {
   const Mirror = (props) => {
     const useStore = props.useStore
     const order = useStore((s) => displayOrder(s, id, fallbackIndex))
-    const hidden = useStore((s) => s.visible[id] === false)
+    const mode = useStore((s) => modeOf(s.visible, id))
     const size = useStore((s) => s.size)
-    if (hidden) return null
+    if (mode !== MODE_SHOWN) return null
     const uniform = size > 0
     return (
       <div
@@ -296,15 +335,16 @@ const MoreGlyph = () => (
 /**
  * The fixed "More" trigger, registered into `sidebar.footer.action` (it
  * declares the `dsh-sbf.more` child slot). Renders nothing while no button
- * is hidden. The popup lists the hidden buttons — each a functional mirror
- * of the original button (original component + inject), so clicks work.
+ * is folded into it. The popup lists those buttons — each a functional
+ * mirror of the original button (original component + inject), so clicks
+ * work. Fully-hidden buttons are NOT listed here.
  */
 function MoreButton(props) {
   const { t, useStore, renderSlot, wide, listButtons } = props
   const visible = useStore((s) => s.visible)
   const size = useStore((s) => s.size)
   const [open, setOpen] = useState(false)
-  const hidden = listButtons().filter((b) => visible[b.id] === false)
+  const hidden = listButtons().filter((b) => modeOf(visible, b.id) === MODE_MORE)
 
   // Close on outside click while open (the popup stops propagation).
   useEffect(() => {
@@ -350,7 +390,8 @@ function MoreButton(props) {
 
 /**
  * "侧栏按钮设置" settings page: every manageable footer button as a draggable
- * row with a visibility toggle. Drag-and-drop rewrites the shared order.
+ * row with a three-state segmented control (Show / Fold into More / Hide).
+ * Drag-and-drop rewrites the shared order.
  */
 function SettingsSection(props) {
   const { t, useStore, actions, listButtons } = props
@@ -439,7 +480,7 @@ function SettingsSection(props) {
       <div className="dsh-sbf-sizeHint">{t('settings.sizeHint')}</div>
       <div className="dsh-sbf-settingsList">
         {sorted.map((b) => {
-          const shown = visible[b.id] !== false
+          const mode = modeOf(visible, b.id)
           return (
             <div
               key={b.id}
@@ -453,15 +494,19 @@ function SettingsSection(props) {
               <span className="dsh-sbf-grip" aria-hidden="true">⠿</span>
               {iconOf(b.id)}
               <span className="dsh-sbf-name">{labelOf(t, b.id, b.entry)}</span>
-              <button
-                type="button"
-                className={`dsh-sbf-toggle${shown ? ' on' : ''}`}
-                aria-pressed={shown}
-                onClick={() => { actions.setVisible(b.id, !shown) }}
-              >
-                <span className="dsh-sbf-toggleTrack"><span className="dsh-sbf-toggleThumb" /></span>
-                <span className="dsh-sbf-toggleText">{shown ? t('settings.shown') : t('settings.hidden')}</span>
-              </button>
+              <div className="dsh-sbf-mode" role="group" aria-label={labelOf(t, b.id, b.entry)}>
+                {MODES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`dsh-sbf-modeOpt${mode === m ? ' on' : ''}`}
+                    aria-pressed={mode === m}
+                    onClick={() => { actions.setMode(b.id, m) }}
+                  >
+                    {t(`settings.mode.${m}`)}
+                  </button>
+                ))}
+              </div>
             </div>
           )
         })}
@@ -474,13 +519,13 @@ function SettingsSection(props) {
 
 /**
  * Build the popup copy for one button. Renders the ORIGINAL button component
- * only while the button is hidden (the More popup lists hidden buttons);
- * otherwise renders nothing. All composed props pass straight through.
+ * only while the button is folded into the More menu (mode 'more'); 'shown'
+ * and 'hidden' buttons render nothing here. All composed props pass through.
  */
 function makePopupMirror(id, origComponent) {
   const PopupMirror = (props) => {
-    const hidden = props.useStore((s) => s.visible[id] === false)
-    if (!hidden) return null
+    const inMore = props.useStore((s) => modeOf(s.visible, id) === MODE_MORE)
+    if (!inMore) return null
     return (
       <div className="dsh-sbf-popRow">
         {createElement(origComponent, props)}
@@ -496,7 +541,8 @@ function makePopupMirror(id, origComponent) {
 /**
  * Keep two mirror sets in sync with the footer-action ledger:
  *   - footer mirrors (priority -1, same id) into `sidebar.footer.action`,
- *   - popup mirrors (hidden buttons, original component) into MORE_SLOT.
+ *   - popup mirrors (buttons folded into the More menu, original component)
+ *     into MORE_SLOT.
  * Runs on every ledger change (the slots service batches per microtask) and
  * is idempotent: our own registrations are filtered by registrant, so a
  * mirror write never loops back into another write.
