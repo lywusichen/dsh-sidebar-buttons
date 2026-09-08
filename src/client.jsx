@@ -26,7 +26,7 @@
  */
 
 import { createElement, useEffect, useState } from 'react'
-import { defineStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { defineStore } from '@deepseek-ai/dsh-client-store'
 import { IconSkillOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 
 // --- Constants ---------------------------------------------------------------
