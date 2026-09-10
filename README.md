@@ -1,17 +1,47 @@
 # dsh-sidebar-buttons
 
-English · [简体中文](./README.zh.md)
+English | [简体中文](README.zh.md)
 
-A DeepSeek Harness plugin. Manages the buttons at the bottom of the left sidebar: reorder them, control each one with three display modes, and give them all the same height. Client-side only, nothing in the DSH core is touched, uninstalling restores the original sidebar.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin.
+Takes over the buttons at the bottom of the left sidebar: drag to reorder them,
+put each one into one of three display states, and give them all the same height.
 
-## Features
+## Compatibility
 
-- New "Sidebar Buttons" page in Settings lists every button registered in the sidebar foot; drag rows to change the order, the sidebar updates immediately
-- Each button has three display modes:
-  - **Show**: pinned in the sidebar
-  - **Fold into More**: moved into a "More" button above Settings (only shown while at least one button is folded), where it stays usable
-  - **Hide**: absent from the sidebar and the More menu alike — recoverable only from the settings page
-- Buttons from different plugins come in different sizes; pick one height for all of them, keep each button's original size, or enter a custom value
+Tested on **DSH 0.1.5-rc.1** (web profile). Also runs on 0.1.2-rc.1 — those two
+releases are what `dsh.engines.dsh` in `package.json` declares, so a host or
+plugin manager can read the same range without parsing this file.
+
+Everything happens in the browser. The plugin re-registers entries in the
+`sidebar.footer.action` slot — a documented slot — and never touches the DSH
+core or another plugin's files, so uninstalling it restores the original
+sidebar.
+
+## Install
+
+1. Add the plugin:
+
+   ```bash
+   dsh plugin --profile web add github:lywusichen/dsh-sidebar-buttons
+   ```
+
+2. Restart DSH.
+
+3. Open **Settings → Sidebar Buttons**.
+
+## What it does
+
+- Lists every button currently registered in the sidebar foot. Drag a row to
+  change the order; the sidebar updates as you drop it.
+- Each button has three display states:
+  - **Show** — pinned in the sidebar, as usual.
+  - **Fold into More** — moved into a "More" button above Settings. The More
+    button only exists while at least one entry is folded, and folded buttons
+    stay fully usable from its menu.
+  - **Hide** — gone from both the sidebar and the More menu. Only the settings
+    page can bring it back.
+- Buttons from different plugins come in different sizes. Pick one height for
+  all of them, keep each button's own size, or type a custom pixel value.
 
 ## Screenshots
 
@@ -23,13 +53,26 @@ A DeepSeek Harness plugin. Manages the buttons at the bottom of the left sidebar
 
 ![Settings page](assets/settings-page.png)
 
-## Install
+## How it works
 
-```bash
-dsh plugin --profile web add github:lywusichen/dsh-sidebar-buttons
-```
+The sidebar foot is a list slot, so a plugin can register more than one entry
+under the same id and the renderer sorts them by `priority`. This plugin
+re-registers each existing entry with `priority: -1`, which puts its copy in
+front of the original, and renders its own wrapper around the original
+component. Order, visibility, and size then come from a shared store that every
+wrapper reads. Nothing is unregistered, so turning the plugin off returns
+control to the originals immediately.
 
-Restart DSH, then open Settings → Sidebar Buttons.
+## Known limitations
+
+- Only buttons registered in the `sidebar.footer.action` slot are listed. A
+  plugin that draws its own controls elsewhere in the sidebar is out of reach.
+- Reordering and the More menu depend on `slots.entries` and `slots.subscribe`,
+  which the plugin relies on to stay aligned with registrations made after it
+  loads. If a future DSH release changes the list-slot contract, this plugin
+  needs an update.
+- The three states are stored per button id. Two plugins registering the same id
+  share one state.
 
 ## Build
 
@@ -38,6 +81,8 @@ npm install   # esbuild
 npm run build # generates lib/client.js
 ```
 
+Commit `lib/client.js`. Git-hosted installs consume the built artifact directly.
+
 ## License
 
-MIT
+[MIT](LICENSE)
