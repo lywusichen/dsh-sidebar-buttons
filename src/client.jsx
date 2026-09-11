@@ -23,9 +23,12 @@
  *   get no such mirror, so they vanish everywhere. A reconciler watches the
  *   slot ledger and keeps the mirrors in sync as buttons register/unregister
  *   (plugin load order is irrelevant).
+ *   Buttons whose real DOM is a React portal (their slot entry is only an
+ *   anchor) cannot be moved by re-rendering them; those are relocated as real
+ *   DOM nodes instead — see the "escapee" section below.
  */
 
-import { createElement, useEffect, useState } from 'react'
+import { createElement, useEffect, useRef, useState } from 'react'
 import { defineStore } from '@deepseek-ai/dsh-client-store'
 import { IconSkillOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 
@@ -134,8 +137,11 @@ const STYLES = `
 /* Popup rows: buttons become flush menu items — full row width, no bleed,
    uniform 34px height, single-layer hover. Without this the original
    sidebar-button styles (calc(100%+8px) width, -4px margins, 12px radius)
-   overflow the card and read as a second overlapping layer. */
-.dsh-sbf-pop .dsh-sbf-popRow > button{
+   overflow the card and read as a second overlapping layer. A relocated
+   escapee arrives inside its own host element (dsh-mneme's wrapper is
+   display:contents), so the button rule is a descendant, not a child. */
+.dsh-sbf-pop .dsh-sbf-popRow > *{min-width:0;width:100%}
+.dsh-sbf-pop .dsh-sbf-popRow button{
   width:100%!important;
   height:34px!important;
   min-height:34px!important;
@@ -145,7 +151,7 @@ const STYLES = `
   box-sizing:border-box!important;
   background:transparent!important
 }
-.dsh-sbf-pop .dsh-sbf-popRow > button:hover{background:var(--dsw-alias-interactive-bg-hover)!important}
+.dsh-sbf-pop .dsh-sbf-popRow button:hover{background:var(--dsw-alias-interactive-bg-hover)!important}
 /* Settings section rows. */
 .dsh-sbf-settings{display:flex;flex-direction:column;gap:10px;padding:4px 0}
 .dsh-sbf-settingsHint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
@@ -292,6 +298,209 @@ function displayOrder(state, id, fallbackIndex) {
   return idx >= 0 ? idx + 1 : UNCONFIGURED_ORDER_BASE + fallbackIndex
 }
 
+// --- Portal-hosted ("escapee") buttons ---------------------------------------
+/**
+ * Some plugins register into the slot only as an ANCHOR: their real button is a
+ * React portal the component itself inserts elsewhere in the DOM (dsh-mneme
+ * mounts it above the workspace list, next to “New session”). Re-rendering such
+ * a component inside another container CANNOT relocate it — the portal target
+ * is baked into the component — so the mirror has to move the REAL DOM node
+ * instead. Symptoms without this: the button vanishes while its mode is 'more'
+ * (the anchor unmounts) and, once the More menu opens, it re-appears at its own
+ * place in the sidebar while the popup row stays empty.
+ *
+ * Escapees are handled by adoption + relocation:
+ *   - declared in PORTAL_HOSTS, or discovered at runtime (our cell/row mounted
+ *     but stayed empty while a `[data-plugin-entry]` host for that id exists),
+ *   - the original component is kept mounted in EVERY mode, so its node exists
+ *     to be moved,
+ *   - placement follows the mode: 'shown' → its own home (where the component
+ *     put it), 'more' → the open More popup row, 'hidden' → a hidden park.
+ * The moved node stays the real button with its real events — nothing is
+ * cloned, re-wired or click-spoofed. A parked node stays mounted, so overlays
+ * the same component renders keep working.
+ *
+ * Discovered-by-DOM nodes only re-locate as long as their own plugin keeps
+ * rendering them; the relocation is re-applied on mode changes and shortly
+ * after mount, which covers the components that create their host lazily.
+ */
+const PORTAL_HOSTS = {
+  'dsh-mneme': {
+    host: '[data-plugin-entry="@modusensus/dsh-mneme"]',
+    // Where that plugin inserts its wrapper: right before the workspace list.
+    // Re-resolved from this selector on every restore, because the sidebar
+    // re-renders (session switches) and a remembered sibling can go stale.
+    homeBefore: '[class*="regionArea"]',
+  },
+}
+/** Where relocated nodes wait while their mode has no visible place. */
+const PARK_ID = 'dsh-sbf-park'
+/** id -> { mode, row, node }; presence means "known escapee". */
+const escapeeState = new Map()
+/** Adopted node -> its own home ({ parent, before }), remembered on first move. */
+const homes = new WeakMap()
+/** React surfaces that re-render when a new escapee is discovered. */
+const escapeeWatchers = new Set()
+
+/** Whether this entry is (or is declared to be) portal-hosted. */
+function isEscapee(id) {
+  return PORTAL_HOSTS[id] !== undefined || escapeeState.has(id)
+}
+
+/** The declaration for an id (a bare selector string is accepted too). */
+function escapeeDeclaration(id) {
+  const declared = PORTAL_HOSTS[id]
+  if (declared === undefined) return undefined
+  return typeof declared === 'string' ? { host: declared } : declared
+}
+
+/** Subscribe to escapee discoveries (returns the unsubscribe function). */
+function watchEscapees(fn) {
+  escapeeWatchers.add(fn)
+  return () => { escapeeWatchers.delete(fn) }
+}
+
+/** Mark a runtime-discovered escapee and let every surface re-render. */
+function markEscapee(id) {
+  if (escapeeState.has(id)) return false
+  escapeeState.set(id, { mode: MODE_SHOWN, row: null, node: null })
+  for (const fn of escapeeWatchers) fn()
+  return true
+}
+
+/**
+ * The DOM node a portal-hosted button actually lives in: the declared selector
+ * first, else any `data-plugin-entry` marker naming this id (the convention
+ * dsh-mneme uses). Null while the plugin has not created it yet.
+ */
+function escapeeHost(id) {
+  if (typeof document === 'undefined') return null
+  const declared = escapeeDeclaration(id)
+  if (declared !== undefined && declared.host !== undefined) {
+    const explicit = document.querySelector(declared.host)
+    if (explicit !== null) return explicit
+  }
+  for (const el of document.querySelectorAll('[data-plugin-entry]')) {
+    const marker = el.getAttribute('data-plugin-entry') ?? ''
+    if (marker !== '' && marker.includes(id)) return el
+  }
+  return null
+}
+
+/** Lazy hidden container that holds relocated nodes with no visible place. */
+function parkContainer() {
+  let el = document.getElementById(PARK_ID)
+  if (el === null) {
+    el = document.createElement('div')
+    el.id = PARK_ID
+    el.style.display = 'none'
+    document.body.appendChild(el)
+  }
+  return el
+}
+
+/** Put an adopted node back where its own component placed it. */
+function sendHome(id, node) {
+  const home = homes.get(node)
+  if (home === undefined) return
+  const declared = escapeeDeclaration(id)
+  const anchor = declared !== undefined && declared.homeBefore !== undefined
+    ? document.querySelector(declared.homeBefore) : null
+  if (anchor !== null && anchor.parentNode !== null) {
+    anchor.parentNode.insertBefore(node, anchor)
+    homes.delete(node)
+    return
+  }
+  if (home.parent.isConnected) {
+    if (home.before !== null && home.before.parentNode === home.parent) home.parent.insertBefore(node, home.before)
+    else home.parent.appendChild(node)
+    homes.delete(node)
+    return
+  }
+  // Nowhere to put it (the sidebar itself was rebuilt): park it so the button
+  // is not lost, and keep the record so a later restore can still try.
+  parkContainer().appendChild(node)
+}
+
+/**
+ * Apply an escapee's placement from its recorded mode + popup row. Always
+ * recomputed (never incremental), so the footer mirror and the popup can each
+ * update their own half in any order without racing.
+ *
+ * The node is looked up in the DOM first (a remount may have created a new one)
+ * and falls back to the remembered reference: when the More popup closes, React
+ * detaches the row BEFORE running our effect cleanup, so a document query can
+ * no longer see the node — without the fallback it would be orphaned with the
+ * discarded row and the button would be gone for good.
+ */
+function applyEscapee(id) {
+  const state = escapeeState.get(id)
+  if (state === undefined) return
+  const live = escapeeHost(id)
+  if (live !== null) state.node = live
+  const node = state.node
+  if (node === null) return
+  const row = state.row
+  const target = state.mode === MODE_SHOWN ? null
+    : (state.mode === MODE_MORE && row !== null ? row : parkContainer())
+  if (target === null) { sendHome(id, node); return }
+  if (node.parentNode === target) return
+  if (!homes.has(node) && node.parentNode !== null) {
+    homes.set(node, { parent: node.parentNode, before: node.nextSibling })
+  }
+  target.appendChild(node)
+}
+
+/** Footer mirror half: the visibility mode the node must honour. */
+function setEscapeeMode(id, mode) {
+  const state = escapeeRecord(id)
+  if (state === undefined || state.mode === mode) return
+  state.mode = mode
+  applyEscapee(id)
+}
+
+/** Popup half: the row currently offering itself as the node's home. */
+function setEscapeeRow(id, row) {
+  const state = escapeeRecord(id)
+  if (state === undefined || state.row === row) return
+  state.row = row
+  applyEscapee(id)
+}
+
+/**
+ * The record for a declared or already-discovered escapee. Declared ids get
+ * their record on first use — without this a declared escapee would never be
+ * placed, because nothing else puts it into `escapeeState`.
+ */
+function escapeeRecord(id) {
+  const known = escapeeState.get(id)
+  if (known !== undefined) return known
+  if (PORTAL_HOSTS[id] === undefined) return undefined
+  const created = { mode: MODE_SHOWN, row: null, node: null }
+  escapeeState.set(id, created)
+  return created
+}
+
+/**
+ * Hand every adopted node back to its own home and drop the park container.
+ * Called when the plugin is disposed: without it a node parked here would be
+ * thrown away with the container and the button would stay gone.
+ */
+function releaseEscapees() {
+  for (const [id, state] of escapeeState) {
+    if (state.node !== null) sendHome(id, state.node)
+  }
+  escapeeState.clear()
+  if (typeof document !== 'undefined') document.getElementById(PARK_ID)?.remove()
+}
+
+/** Runtime discovery for undeclared escapees: mounted, but produced no button. */
+function discoverEscapee(id, container) {
+  if (container === null || container.querySelector('button') !== null) return
+  if (escapeeHost(id) === null) return
+  markEscapee(id)
+}
+
 // --- Footer mirror (priority -1 shadow of an original button) ----------------
 
 /**
@@ -307,10 +516,39 @@ function makeMirror(id, origComponent, fallbackIndex) {
     const order = useStore((s) => displayOrder(s, id, fallbackIndex))
     const mode = useStore((s) => modeOf(s.visible, id))
     const size = useStore((s) => s.size)
+    const cellRef = useRef(null)
+    const [tick, setTick] = useState(0)
+    useEffect(() => watchEscapees(() => setTick((v) => v + 1)), [])
+    const escapee = isEscapee(id)
+
+    // Escapee: keep the component mounted in every mode — its portaled node is
+    // what gets relocated, so unmounting it would remove the button entirely.
+    // Otherwise keep the original contract (nothing unless 'shown') and, while
+    // the cell is up, watch for the "mounted but empty" signature that betrays
+    // an undeclared escapee. The trailing re-applies cover components that
+    // create their host a moment after mount.
+    useEffect(() => {
+      if (escapee) {
+        setEscapeeMode(id, mode)
+        const replay = () => { applyEscapee(id) }
+        const t1 = setTimeout(replay, 150)
+        const t2 = setTimeout(replay, 1200)
+        return () => { clearTimeout(t1); clearTimeout(t2) }
+      }
+      if (mode !== MODE_SHOWN) return undefined
+      const check = () => { discoverEscapee(id, cellRef.current) }
+      check()
+      const t1 = setTimeout(check, 300)
+      const t2 = setTimeout(check, 1200)
+      return () => { clearTimeout(t1); clearTimeout(t2) }
+    }, [mode, escapee, tick])
+
+    if (escapee) return createElement(origComponent, props)
     if (mode !== MODE_SHOWN) return null
     const uniform = size > 0
     return (
       <div
+        ref={cellRef}
         className={`dsh-sbf-cell${uniform ? ' dsh-sbf-cell--uniform' : ''}${props.wide ? '' : ' dsh-sbf-cell--rail'}`}
         style={{ order, ...(uniform ? { '--dsh-sbf-size': `${size}px` } : {}) }}
       >
@@ -521,13 +759,37 @@ function SettingsSection(props) {
  * Build the popup copy for one button. Renders the ORIGINAL button component
  * only while the button is folded into the More menu (mode 'more'); 'shown'
  * and 'hidden' buttons render nothing here. All composed props pass through.
+ *
+ * Escapees are different: the component is already mounted by the footer
+ * mirror, so this surface only offers the row as the node's new home (moving
+ * the real node in) — rendering the component a second time would mount a
+ * second portal host and produce a duplicate button.
  */
 function makePopupMirror(id, origComponent) {
   const PopupMirror = (props) => {
     const inMore = props.useStore((s) => modeOf(s.visible, id) === MODE_MORE)
+    const rowRef = useRef(null)
+    const [tick, setTick] = useState(0)
+    useEffect(() => watchEscapees(() => setTick((v) => v + 1)), [])
+    const escapee = isEscapee(id)
+
+    useEffect(() => {
+      if (!inMore) return undefined
+      if (escapee) {
+        setEscapeeRow(id, rowRef.current)
+        // Hand the row back (the node is parked) once the popup closes.
+        return () => { setEscapeeRow(id, null) }
+      }
+      const check = () => { discoverEscapee(id, rowRef.current) }
+      check()
+      const t1 = setTimeout(check, 300)
+      return () => { clearTimeout(t1) }
+    }, [inMore, escapee, tick])
+
     if (!inMore) return null
+    if (escapee) return <div className="dsh-sbf-popRow" ref={rowRef} />
     return (
-      <div className="dsh-sbf-popRow">
+      <div className="dsh-sbf-popRow" ref={rowRef}>
         {createElement(origComponent, props)}
       </div>
     )
@@ -662,6 +924,7 @@ export function apply(ctx) {
       unsubscribe()
       reconciler.dispose()
       moreDispose()
+      releaseEscapees()
     }
   })
 }
