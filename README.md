@@ -63,10 +63,18 @@ component. Order, visibility, and size then come from a shared store that every
 wrapper reads. Nothing is unregistered, so turning the plugin off returns
 control to the originals immediately.
 
+One kind of button does not fit that model: the slot entry is only an anchor and
+the plugin renders the real button elsewhere in the sidebar, so re-rendering it
+inside another container moves nothing. Those buttons are relocated as their
+real DOM node instead — the component stays mounted and the node moves between
+the sidebar, the More menu, and a hidden park, depending on its state.
+
 ## Known limitations
 
-- Only buttons registered in the `sidebar.footer.action` slot are listed. A
-  plugin that draws its own controls elsewhere in the sidebar is out of reach.
+- When a slot entry is only an anchor and the plugin draws the real button
+  elsewhere in the sidebar, this plugin finds that node through a
+  `data-plugin-entry` marker or a built-in declaration table. With neither, it
+  cannot tell the button apart and leaves it alone.
 - Reordering and the More menu depend on `slots.entries` and `slots.subscribe`,
   which the plugin relies on to stay aligned with registrations made after it
   loads. If a future DSH release changes the list-slot contract, this plugin
